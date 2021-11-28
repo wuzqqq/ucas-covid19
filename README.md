@@ -172,6 +172,7 @@ $ crontab -e
 - 2021年8月15日 添加了 tg bot 消息推送；修复了 sender_email 默认不为空导致未配置邮件发送也会发送邮件的 bug，见  [PR#44](https://github.com/IanSmith123/ucas-covid19/pull/44)
 
 
+
 # 致谢
 - 感谢 [karuboniru](https://github.com/IanSmith123/ucas-covid19/pull/1) 提供的github actions 支持
 - 感谢 [tyfulcrum](https://github.com/IanSmith123/ucas-covid19/pull/2) 对文档的完善工作
