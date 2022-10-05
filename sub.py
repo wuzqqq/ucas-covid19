@@ -15,6 +15,7 @@ from random import randint
 from datetime import datetime
 from email.utils import formataddr
 from email.mime.text import MIMEText
+from requests.adapters import HTTPAdapter
 
 
 # 开启debug将会输出打卡填报的数据，关闭debug只会输出打卡成功或者失败，如果使用github actions，请务必设置该选项为False
@@ -76,7 +77,23 @@ def login(s: requests.Session, username, password, cookie_file: Path):
         "username": username,
         "password": password
     }
-    r = s.post("https://app.ucas.ac.cn/uc/wap/login/check", data=payload)
+
+    # 超时重试3次
+    s.mount('http://', HTTPAdapter(max_retries=3))
+    s.mount('https://', HTTPAdapter(max_retries=3))
+
+    try:
+        # 判断连接超时和读取超时的时间为30秒
+        r = s.post("https://app.ucas.ac.cn/uc/wap/login/check", data=payload, timeout=(30, 30))
+    except requests.exceptions.RequestException as e:
+        print("服务器连接异常", e)
+        message(api_key, sender_email, sender_email_passwd, receiver_email,
+                tg_bot_token, tg_chat_id, "健康打卡失败", "服务器连接异常，建议手动检查疫情防控打卡页面是否能够正常加载")
+
+    if r.status_code != 200:
+        print("服务器返回状态异常")
+        message(api_key, sender_email, sender_email_passwd, receiver_email,
+                tg_bot_token, tg_chat_id, "健康打卡失败", "服务器返回状态异常，建议手动检查疫情防控打卡页面是否能够正常加载")
 
     # print(r.text)
     if r.json().get('m') != "操作成功":
@@ -90,8 +107,9 @@ def login(s: requests.Session, username, password, cookie_file: Path):
 
 
 def get_daily(s: requests.Session):
-    daily = s.get("https://app.ucas.ac.cn/ncov/api/default/daily?xgh=0&app_id=ucas")
-    # info = s.get("https://app.ucas.ac.cn/ncov/api/default/index?xgh=0&app_id=ucas")
+    daily = s.get("https://app.ucas.ac.cn/ucasncov/api/default/daily?xgh=0&app_id=ucas")
+#     daily = s.get("https://app.ucas.ac.cn/ncov/api/default/daily?xgh=0&app_id=ucas")
+#     info = s.get("https://app.ucas.ac.cn/ncov/api/default/index?xgh=0&app_id=ucas")
     if '操作成功' not in daily.text:
         # 会话无效，跳转到了登录页面
         print("会话无效")
@@ -101,56 +119,91 @@ def get_daily(s: requests.Session):
     return j.get('d') if j.get('d', False) else False
 
 
+# def submit(s: requests.Session, old: dict):
+#     new_daily = {
+#         'realname': old['realname'],
+#         'number': old['number'],
+#         'szgj_api_info': old['szgj_api_info'],
+#         # 'szgj': old['szgj'],# 2021.8.1 del
+#         # 'old_sfzx': old['sfzx'],# 2021.8.1 del
+#         'sfzx': old['sfzx'],
+#         'szdd': old['szdd'],
+#         'ismoved': 0,  # 如果前一天位置变化这个值会为1，第二天仍然获取到昨天的1，而事实上位置是没变化的，所以置0
+#         # 'ismoved': old['ismoved'],
+#         'tw': old['tw'],
+#         # 'bztcyy': old['bztcyy'], # 2021.8.1 del
+#         # 'sftjwh': old['sfsfbh'],  # 2020.9.16 del
+#         # 'sftjhb': old['sftjhb'],  # 2020.9.16 del
+#         'sfcxtz': old['sfcxtz'],
+#         # 'sfyyjc': old['sfyyjc'],# 2021.8.1 del
+#         # 'jcjgqr': old['jcjgqr'],# 2021.8.1 del
+#         # 'sfjcwhry': old['sfjcwhry'],  # 2020.9.16 del
+#         # 'sfjchbry': old['sfjchbry'],  # 2020.9.16 del
+#         'sfjcbh': old['sfjcbh'],  # 是否接触病患
+#         # 'jcbhlx': old['jcbhlx'], # 2021.1.29 del 接触病患类型
+#         'sfcyglq': old['sfcyglq'],  # 是否处于隔离期
+#         # 'gllx': old['gllx'],   # 2021.1.29 del 隔离类型
+#         'sfcxzysx': old['sfcxzysx'],
+#         # 'old_szdd': old['szdd'],# 2021.8.1 del
+#         'geo_api_info': old['old_city'],  # 保持昨天的结果
+#         'old_city': old['old_city'],
+#         'geo_api_infot': old['geo_api_infot'],
+#         'date': datetime.now(tz=pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d"),
+#         # 'fjsj': old['fjsj'],  # 返京时间# 2021.8.1 del
+#         # 'ljrq': old['ljrq'],  # 离京日期 add@2021.1.24# 2021.8.1 del
+#         # 'qwhd': old['qwhd'],  # 去往何地 add@2021.1.24# 2021.8.1 del
+#         # 'chdfj': old['chdfj'],  # 从何地返京 add@2021.1.24# 2021.8.1 del
+#         # 'jcbhrq': old['jcbhrq'], # del 2021.1.29 接触病患日期
+#         # 'glksrq': old['glksrq'], # del 2021.1.29 隔离开始日期
+#         # 'fxyy': old['fxyy'],# 2021.8.1 del
+#         # 'jcjg': old['jcjg'],# 2021.8.1 del
+#         # 'jcjgt': old['jcjgt'],# 2021.8.1 del
+#         # 'qksm': old['qksm'],# 2021.8.1 del
+#         # 'remark': old['remark'],
+#         'jcjgqk': old['jcjgqk'],
+#         # 'jcwhryfs': old['jcwhryfs'],# 2021.8.1 del
+#         # 'jchbryfs': old['jchbryfs'],# 2021.8.1 del
+#         'gtshcyjkzt': old['gtshcyjkzt'],  # add @2020.9.16
+#         'jrsfdgzgfxdq': old['jrsfdgzgfxdq'],  # add @2020.9.16
+#         'jrsflj': old['jrsflj'],  # add @2020.9.16
+#         'app_id': 'ucas'
+#     }
 def submit(s: requests.Session, old: dict):
     new_daily = {
+        'date': datetime.now(tz=pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d"),
         'realname': old['realname'],
         'number': old['number'],
         'szgj_api_info': old['szgj_api_info'],
         # 'szgj': old['szgj'],# 2021.8.1 del
         # 'old_sfzx': old['sfzx'],# 2021.8.1 del
-        'sfzx': old['sfzx'],
-        'szdd': old['szdd'],
+
         'ismoved': 0,  # 如果前一天位置变化这个值会为1，第二天仍然获取到昨天的1，而事实上位置是没变化的，所以置0
         # 'ismoved': old['ismoved'],
-        'tw': old['tw'],
-        # 'bztcyy': old['bztcyy'], # 2021.8.1 del
-        # 'sftjwh': old['sfsfbh'],  # 2020.9.16 del
-        # 'sftjhb': old['sftjhb'],  # 2020.9.16 del
-        'sfcxtz': old['sfcxtz'],
-        # 'sfyyjc': old['sfyyjc'],# 2021.8.1 del
-        # 'jcjgqr': old['jcjgqr'],# 2021.8.1 del
-        # 'sfjcwhry': old['sfjcwhry'],  # 2020.9.16 del
-        # 'sfjchbry': old['sfjchbry'],  # 2020.9.16 del
-        'sfjcbh': old['sfjcbh'],  # 是否接触病患
-        # 'jcbhlx': old['jcbhlx'], # 2021.1.29 del 接触病患类型
-        'sfcyglq': old['sfcyglq'],  # 是否处于隔离期
-        # 'gllx': old['gllx'],   # 2021.1.29 del 隔离类型
-        'sfcxzysx': old['sfcxzysx'],
-        # 'old_szdd': old['szdd'],# 2021.8.1 del
+        'jzdz': old['jzdz'],  # 居住地址
+        'zrzsdd': old['zrzsdd'],  # 昨日住宿地点
+        'sfzx': old['sfzx'],  # 是否在校
+        'szdd': old['szdd'],  # 所在地点
+        'geo_api_infot': old['geo_api_infot'],  # 当前位置
+        'dqsfzzgfxdq': old['dqsfzzgfxdq'],  # 是否在中高风险地区
+        'zgfxljs': old['zgfxljs'],  # 中高风险旅居史
+        'tw': old['tw'],  # 体温
+        'sffrzz': old['sffrzz'],  # 是否发热症状
+        'dqqk1': old['dqqk1'],  # 当前情况1
+        'dqqk2': old['dqqk2'],  # 当前情况2
+        'sfjshsjc': old['sfjshsjc'],  # 是否接受核酸检测
+        'dyzymjzqk': old['dyzymjzqk'],  # 第一针疫苗接种情况
+        'dyzjzsj': old['dyzjzsj'],  # 第一针疫苗接种时间
+        'dezymjzqk': old['dyzymjzqk'],  # 第二针疫苗接种情况
+        'dezjzsj': old['dyzjzsj'],  # 第二针疫苗接种时间
+        'dszymjzqk': old['dyzymjzqk'],  # 第三针疫苗接种情况
+        'dszjzsj': old['dyzjzsj'],  # 第三针疫苗接种时间
+        'gtshryjkzk': old['gtshryjkzk'],  # 共同生活人员健康状况
         'geo_api_info': old['old_city'],  # 保持昨天的结果
         'old_city': old['old_city'],
-        'geo_api_infot': old['geo_api_infot'],
-        'date': datetime.now(tz=pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d"),
-        # 'fjsj': old['fjsj'],  # 返京时间# 2021.8.1 del
-        # 'ljrq': old['ljrq'],  # 离京日期 add@2021.1.24# 2021.8.1 del
-        # 'qwhd': old['qwhd'],  # 去往何地 add@2021.1.24# 2021.8.1 del
-        # 'chdfj': old['chdfj'],  # 从何地返京 add@2021.1.24# 2021.8.1 del
-        # 'jcbhrq': old['jcbhrq'], # del 2021.1.29 接触病患日期
-        # 'glksrq': old['glksrq'], # del 2021.1.29 隔离开始日期
-        # 'fxyy': old['fxyy'],# 2021.8.1 del
-        # 'jcjg': old['jcjg'],# 2021.8.1 del
-        # 'jcjgt': old['jcjgt'],# 2021.8.1 del
-        # 'qksm': old['qksm'],# 2021.8.1 del
-        # 'remark': old['remark'],
-        'jcjgqk': old['jcjgqk'],
-        # 'jcwhryfs': old['jcwhryfs'],# 2021.8.1 del
-        # 'jchbryfs': old['jchbryfs'],# 2021.8.1 del
-        'gtshcyjkzt': old['gtshcyjkzt'],  # add @2020.9.16
-        'jrsfdgzgfxdq': old['jrsfdgzgfxdq'],  # add @2020.9.16
-        'jrsflj': old['jrsflj'],  # add @2020.9.16
+        # 'geo_api_infot': old['geo_api_infot'],
+
         'app_id': 'ucas'
     }
-
     check_data_msg = check_submit_data(new_daily)  # 检查上报结果
     if check_data_msg is not None:
         message(api_key, sender_email, sender_email_passwd, receiver_email, tg_bot_token,
@@ -158,7 +211,7 @@ def submit(s: requests.Session, old: dict):
         print("提交数据存在问题，请手动打卡，问题原因： {}".format(check_data_msg))
         return
 
-    r = s.post("https://app.ucas.ac.cn/ncov/api/default/save", data=new_daily)
+    r = s.post("https://app.ucas.ac.cn/ucasncov/api/default/save", data=new_daily)
     if debug:
         from urllib.parse import parse_qs, unquote
         print("昨日信息:", json.dumps(old, ensure_ascii=False, indent=2))
@@ -188,8 +241,8 @@ def check_submit_data(data: dict):
     if int(data['tw']) > 4:
         msg.append("体温大于 37.3 度 ，请手动填报")
 
-    if data['jrsflj'] == '是':
-        msg.append("近日有离京经历，请手动填报")
+#     if data['jrsflj'] == '是':
+#         msg.append("近日有离京经历，请手动填报")
 
     return ";".join(msg) if msg else None
 
